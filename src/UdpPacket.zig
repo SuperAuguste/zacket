@@ -11,6 +11,19 @@ length: u16,
 checksum: u16,
 payload: []u8,
 
+pub fn encode(packet: UdpPacket, writer: anytype) !void {
+    var buffer: [8]u8 = undefined;
+    var fbs_writer = std.io.fixedBufferStream(&buffer).writer();
+
+    try fbs_writer.writeIntBig(Port, packet.source_port);
+    try fbs_writer.writeIntBig(Port, packet.destination_port);
+    try fbs_writer.writeIntBig(u16, packet.length);
+    try fbs_writer.writeIntBig(u16, packet.checksum); // TODO: Calculate checksum!
+
+    try writer.writeAll(&buffer);
+    try writer.writeAll(packet.payload);
+}
+
 pub fn decode(allocator: *std.mem.Allocator, data: []const u8) !UdpPacket {
     if (data.len < 8)
         return error.TooShort;
@@ -37,7 +50,7 @@ pub fn deinit(self: *UdpPacket, allocator: *std.mem.Allocator) void {
     allocator.free(self.payload);
 }
 
-test "Basic UDP packet parsing (xkcd.com DNS answer)" {
+test "UDP packet encode / decode (xkcd.com DNS answer)" {
     const raw_packet = @embedFile("test-data/udp/xkcd.com.bin");
     var packet = try decode(std.testing.allocator, raw_packet);
     defer packet.deinit(std.testing.allocator);
@@ -71,4 +84,10 @@ test "Basic UDP packet parsing (xkcd.com DNS answer)" {
     // zig-fmt: on
 
     try std.testing.expectEqualSlices(u8, &expected_payload, packet.payload);
+
+    var buffer = std.ArrayList(u8).init(std.testing.allocator);
+    defer buffer.deinit();
+
+    try packet.encode(buffer.writer());
+    try std.testing.expectEqualSlices(u8, raw_packet, buffer.items);
 }
