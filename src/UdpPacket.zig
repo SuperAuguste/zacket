@@ -7,9 +7,16 @@ pub const Port = u16;
 
 source_port: Port,
 destination_port: Port,
-length: u16,
 checksum: u16,
 payload: []u8,
+
+// TODO: Handle Jumbograms properly
+pub fn getLength(packet: UdpPacket) u16 {
+    return if (packet.payload.len + 8 > 65_535)
+        0
+    else
+        8 + @intCast(u16, packet.payload.len);
+}
 
 pub fn encode(packet: UdpPacket, writer: anytype) !void {
     var buffer: [8]u8 = undefined;
@@ -17,7 +24,7 @@ pub fn encode(packet: UdpPacket, writer: anytype) !void {
 
     try fbs_writer.writeIntBig(Port, packet.source_port);
     try fbs_writer.writeIntBig(Port, packet.destination_port);
-    try fbs_writer.writeIntBig(u16, packet.length);
+    try fbs_writer.writeIntBig(u16, packet.getLength());
     try fbs_writer.writeIntBig(u16, packet.checksum); // TODO: Calculate checksum!
 
     try writer.writeAll(&buffer);
@@ -33,13 +40,13 @@ pub fn decode(allocator: *std.mem.Allocator, data: []const u8) !UdpPacket {
     var packet: UdpPacket = undefined;
     packet.source_port = try reader.readIntBig(Port);
     packet.destination_port = try reader.readIntBig(Port);
-    packet.length = try reader.readIntBig(u16);
+    var length = try reader.readIntBig(u16);
     packet.checksum = try reader.readIntBig(u16);
 
-    packet.payload = try allocator.dupe(u8, if (packet.length == 0)
+    packet.payload = try allocator.dupe(u8, if (length == 0)
         data[8..]
-    else if (packet.length >= 8)
-        data[8..packet.length]
+    else if (length >= 8)
+        data[8..length]
     else
         return error.TooShort);
 
@@ -57,7 +64,7 @@ test "UDP packet encode / decode (xkcd.com DNS answer)" {
 
     try std.testing.expectEqual(@as(Port, 53), packet.source_port);
     try std.testing.expectEqual(@as(Port, 57452), packet.destination_port);
-    try std.testing.expectEqual(@as(u16, 146), packet.length);
+    try std.testing.expectEqual(@as(u16, 146), packet.getLength());
     try std.testing.expectEqual(@as(u16, 0x4eb1), packet.checksum);
 
     // zig-fmt: off
